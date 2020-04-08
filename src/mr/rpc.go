@@ -14,16 +14,40 @@ import "strconv"
 // and reply for an RPC.
 //
 
-type ExampleArgs struct {
-	X int
+const (
+	mapConst = iota + 1
+	reduceConst
+)
+
+// this is the first time I use go rpc, so it's hard to
+type GetTaskReq struct {
 }
 
-type ExampleReply struct {
-	Y int
+type GetTaskResp struct {
+	Valid       bool
+	Done        bool
+	TaskType    int
+	File        string
+	ReduceN     int
+	MapOrder    int
+	MapN        int
+	ReduceOrder int
+}
+
+type CommitWorkReq struct {
+	TaskType    int
+	File        string
+	ReduceN     int
+	MapOrder    int
+	MapN        int
+	ReduceOrder int
+}
+
+type CommitWorkResp struct {
+	Done bool
 }
 
 // Add your RPC definitions here.
-
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the master.
