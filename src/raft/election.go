@@ -1,0 +1,109 @@
+/*
+@Time : 2020/4/13 09:40
+@Author : Minus4
+*/
+package raft
+
+import (
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+// electionManager manages events when raft becomes candidate
+// The election manager will periodically send RequestVote Rpc to all other servers
+// until it gains enough votes or is canceled by other events
+type electionManager struct {
+	rf        *Raft
+	voted     []int32
+	voteCount int
+	mu        sync.Mutex
+	finished  int32
+}
+
+// send recursively execute until this election process is finished
+func (e *electionManager) send(args *RequestVoteArgs) {
+	for {
+		if atomic.LoadInt32(&e.finished) == 1 || e.rf.killed() {
+			return
+		}
+		// get a snapshot of voted
+		e.mu.Lock()
+		voted := e.voted
+		e.mu.Unlock()
+		for i := range e.rf.peers {
+			if i == e.rf.me || voted[i] != 0 {
+				continue
+			}
+			go e.requestVoteHandler(i, args)
+		}
+		time.Sleep(time.Millisecond * 105)
+	}
+}
+
+// requestVoteHandler will do  request vote  and process the reply
+func (e *electionManager) requestVoteHandler(server int, args *RequestVoteArgs) {
+	reply := new(RequestVoteReply)
+	if ok := e.rf.sendRequestVote(server, args, reply); ok {
+		// 可能在别处改变了term,
+		if atomic.LoadInt32(&e.finished) == 1 {
+			return
+		}
+		if reply.Term != args.Term {
+			e.cancel()
+			e.rf.mu.Lock()
+			// get current term and compare
+			term := e.rf.term
+			if term < reply.Term {
+				e.rf.convertToFollower(reply.Term)
+			}
+			e.rf.mu.Unlock()
+			return
+		} else {
+			if reply.VoteGranted {
+				//				DPrintf("server %d grant vote to %d at term %d\n", server, args.CandidateId, args.Term)
+				e.mu.Lock()
+				defer e.mu.Unlock()
+				// duplicate reply
+				if e.voted[server] == 1 {
+					return
+				}
+				e.voted[server] = 1
+				e.voteCount++
+				// the candidate have received vote from a majority server
+				if e.voteCount > len(e.rf.peers)/2 {
+					if atomic.LoadInt32(&e.finished) == 1 {
+						return
+					} else {
+						// end election
+						e.cancel()
+					}
+					e.rf.mu.Lock()
+					defer e.rf.mu.Unlock()
+					if e.rf.state == Candidate && e.rf.term == args.Term {
+						e.rf.convertToLeader()
+					}
+					// else, the response is outdated
+				}
+			} else {
+				e.mu.Lock()
+				e.voted[server] = -1
+				e.mu.Unlock()
+			}
+		}
+	}
+	return
+}
+
+func (e *electionManager) cancel() {
+	atomic.StoreInt32(&e.finished, 1)
+}
+
+func NewElectionManager(rf *Raft) *electionManager {
+	e := &electionManager{
+		rf:        rf,
+		voted:     make([]int32, len(rf.peers)),
+		voteCount: 1,
+	}
+	return e
+}
