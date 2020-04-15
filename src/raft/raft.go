@@ -156,21 +156,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.convertToFollower(args.Term)
 		reply.VoteGranted = true
 		return
-	} else {
-		// term is equal
-		if rf.votedFor < 0 { // haven't voted for anyone，in the first election
-			rf.votedFor = args.CandidateId
-			rf.convertToFollower(args.Term)
-			reply.VoteGranted = true
-			rf.timeout.restartTimer()
-			return
-		}
-		if rf.state == Follower && rf.votedFor == args.CandidateId { // duplicate request
-			reply.VoteGranted = true
-			rf.timeout.restartTimer()
-			return
-		}
-		// else already vote for another server or vote for itself
 	}
 }
 

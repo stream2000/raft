@@ -7,7 +7,6 @@ package raft
 import (
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 // electionManager manages events when raft becomes candidate
@@ -23,21 +22,11 @@ type electionManager struct {
 
 // send recursively execute until this election process is finished
 func (e *electionManager) send(args *RequestVoteArgs) {
-	for {
-		if atomic.LoadInt32(&e.finished) == 1 || e.rf.killed() {
-			return
+	for i := range e.rf.peers {
+		if i == e.rf.me {
+			continue
 		}
-		// get a snapshot of voted
-		e.mu.Lock()
-		voted := e.voted
-		e.mu.Unlock()
-		for i := range e.rf.peers {
-			if i == e.rf.me || voted[i] != 0 {
-				continue
-			}
-			go e.requestVoteHandler(i, args)
-		}
-		time.Sleep(time.Millisecond * 105)
+		go e.requestVoteHandler(i, args)
 	}
 }
 
@@ -64,11 +53,6 @@ func (e *electionManager) requestVoteHandler(server int, args *RequestVoteArgs) 
 				//				DPrintf("server %d grant vote to %d at term %d\n", server, args.CandidateId, args.Term)
 				e.mu.Lock()
 				defer e.mu.Unlock()
-				// duplicate reply
-				if e.voted[server] == 1 {
-					return
-				}
-				e.voted[server] = 1
 				e.voteCount++
 				// the candidate have received vote from a majority server
 				if e.voteCount > len(e.rf.peers)/2 {
@@ -83,12 +67,7 @@ func (e *electionManager) requestVoteHandler(server int, args *RequestVoteArgs) 
 					if e.rf.state == Candidate && e.rf.term == args.Term {
 						e.rf.convertToLeader()
 					}
-					// else, the response is outdated
 				}
-			} else {
-				e.mu.Lock()
-				e.voted[server] = -1
-				e.mu.Unlock()
 			}
 		}
 	}

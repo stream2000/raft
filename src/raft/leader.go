@@ -84,7 +84,7 @@ func (l *leadershipManager) start() {
 			}
 			go l.appendEntriesHandler(i, args)
 		}
-		time.Sleep(time.Millisecond * 105)
+		time.Sleep(time.Millisecond * 150)
 	}
 
 }
