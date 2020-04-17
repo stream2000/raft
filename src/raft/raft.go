@@ -263,8 +263,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
-	rf.Term = 0
-	rf.Logs = make([]LogEntry, 0)
 	// vote for nobody
 	rf.VotedFor = -1
 	rf.state = Follower
@@ -272,6 +270,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.lastApplied = 0
 	rf.cancel = make(chan struct{})
 	rf.applyCh = applyCh
+	// initialize from state persisted before a crash
+	rf.readPersist(persister.ReadRaftState())
 	// start the election timeout timer
 	timeout := NewTimeoutManager(rf, 500)
 	rf.timeout = timeout
@@ -282,7 +282,5 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	go ap.start()
 	// Your initialization code here (2A, 2B, 2C).
 
-	// initialize from state persisted before a crash
-	rf.readPersist(persister.ReadRaftState())
 	return rf
 }

@@ -94,7 +94,6 @@ func (l *leadershipManager) start() {
 
 }
 
-//  TODO handle log committing
 func (l *leadershipManager) appendEntriesHandler(server int, args *AppendEntriesReq) {
 	reply := new(AppendEntriesResp)
 	//defer DPrintf("args %+v to %d reply : %+v\n", args, server, reply)
@@ -123,15 +122,18 @@ func (l *leadershipManager) appendEntriesHandler(server int, args *AppendEntries
 				//DPrintf("matchIndex : %d nextIndex : %d\n", maxMatch, maxMatch+1)
 			} else {
 				// term is equal, but previous log doesn't match
-				l.nextIndex[server] = reply.FirstIndex
-				defer DPrintf("prevIndex: %d nextIndex %d\n", args.PrevLogIndex, l.nextIndex[server])
-				if reply.ConflictTerm > args.Term || reply.ConflictTerm == -1 {
+				if reply.ConflictTerm > args.PrevLogTerm {
+					l.nextIndex[server] = reply.FirstIndex
 					return
 				}
 				for index := args.PrevLogIndex; index >= 1; index-- {
 					curEntry := l.rf.Logs[index-1]
 					if curEntry.Term == reply.ConflictTerm {
 						l.nextIndex[server] = index + 1
+						return
+					}
+					if curEntry.Term < reply.ConflictTerm {
+						l.nextIndex[server] = reply.FirstIndex
 						return
 					}
 				}
@@ -181,7 +183,7 @@ func (c *committer) start() {
 				termToCommit := l.rf.Logs[curMatch-1].Term
 				if termToCommit != l.term {
 					l.rf.mu.Unlock()
-					continue
+					break
 				}
 				l.rf.commitIndex = curMatch
 				l.commitIndex = curMatch

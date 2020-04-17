@@ -105,8 +105,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesReq, reply *AppendEntriesResp) 
 	prevLogTerm := 0
 	if args.PrevLogIndex > len(rf.Logs) {
 		// make reply.ConflictTerm  bigger than args.Term so that leader can adopt the first index
-		reply.ConflictTerm = -1
-		reply.FirstIndex = len(rf.Logs)
+		reply.ConflictTerm = args.Term + 1
+		reply.FirstIndex = len(rf.Logs) + 1
 		return
 	}
 	if args.PrevLogIndex != 0 {
