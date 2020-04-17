@@ -18,10 +18,11 @@ package raft
 //
 
 import (
-	_ "net/http/pprof"
+	"bytes"
 	"sync"
 	"sync/atomic"
 
+	"../labgob"
 	"../labrpc"
 )
 
@@ -50,14 +51,14 @@ type ApplyMsg struct {
 //
 type Raft struct {
 	state       raftState
-	term        int           // only make or function like convert to xxx can modify this
+	Term        int           // only make or function like convert to xxx can modify this
 	me          int           // this peer's index into peers[]
 	dead        int32         // set by Kill()
 	cancel      chan struct{} // use to terminate all long run goroutines when the raft is killed
-	votedFor    int
+	VotedFor    int
 	commitIndex int
 	lastApplied int
-	logs        []LogEntry
+	Logs        []LogEntry
 	peers       []*labrpc.ClientEnd // RPC end points of all peers
 	persister   *Persister          // Object to hold this peer's persisted state
 	timeout     *timeoutManager
@@ -87,7 +88,7 @@ type LogEntry struct {
 func (rf *Raft) GetState() (int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	return rf.term, rf.state == Leader
+	return rf.Term, rf.state == Leader
 }
 
 //
@@ -98,12 +99,13 @@ func (rf *Raft) GetState() (int, bool) {
 func (rf *Raft) persist() {
 	// Your code here (2C).
 	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.Logs)
+	e.Encode(rf.VotedFor)
+	e.Encode(rf.Term)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 //
@@ -115,17 +117,20 @@ func (rf *Raft) readPersist(data []byte) {
 	}
 	// Your code here (2C).
 	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var logs []LogEntry
+	var votedFor int
+	var term int
+	if d.Decode(&logs) != nil ||
+		d.Decode(&votedFor) != nil ||
+		d.Decode(&term) != nil {
+		panic("decode error")
+	} else {
+		rf.Logs = logs
+		rf.VotedFor = votedFor
+		rf.Term = term
+	}
 }
 
 //
@@ -151,17 +156,18 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		term := -1
 		return index, term, false
 	}
-	index := len(rf.logs) + 1
-	term := rf.term
+	index := len(rf.Logs) + 1
+	term := rf.Term
 	// directly append the log then return, other background goroutine will check the length of logs
 	entry := LogEntry{
 		Index:   index,
 		Term:    term,
 		Command: command,
 	}
-	rf.logs = append(rf.logs, entry)
-	rf.leadership.matchIndex[rf.me] = len(rf.logs)
-	DPrintf("start: server %d add entry at term %d cur length %d\n", rf.me, rf.term, len(rf.logs))
+	rf.Logs = append(rf.Logs, entry)
+	rf.persist()
+	rf.leadership.matchIndex[rf.me] = len(rf.Logs)
+	DPrintf("start: server %d add entry at term %d cur length %d\n", rf.me, rf.Term, len(rf.Logs))
 	return index, term, true
 }
 
@@ -189,25 +195,27 @@ func (rf *Raft) killed() bool {
 }
 
 func (rf *Raft) convertToCandidate() {
-	DPrintf("server %d at term %d is converting to candidate at term %d\n", rf.me, rf.term, rf.term+1)
-	rf.term++
+	DPrintf("server %d at term %d is converting to candidate at term %d\n", rf.me, rf.Term, rf.Term+1)
+	rf.Term++
+	rf.persist()
 	rf.state = Candidate
 	e := NewElectionManager(rf)
 	rf.election = e
 	args := &RequestVoteArgs{
-		Term:         rf.term,
+		Term:         rf.Term,
 		CandidateId:  rf.me,
-		LastLogIndex: len(rf.logs),
+		LastLogIndex: len(rf.Logs),
 	}
 	if args.LastLogIndex != 0 {
-		args.LastLogTerm = rf.logs[args.LastLogIndex-1].Term
+		args.LastLogTerm = rf.Logs[args.LastLogIndex-1].Term
 	}
 	go e.send(args)
 }
 
 func (rf *Raft) convertToFollower(term int) {
-	DPrintf("server %d at term %d is converting to follower at term %d\n", rf.me, rf.term, rf.term+1)
-	rf.term = term
+	DPrintf("server %d at term %d is converting to follower at term %d\n", rf.me, rf.Term, rf.Term+1)
+	rf.Term = term
+	rf.persist()
 	switch rf.state {
 	case Follower:
 		// is only maintaining the timeout state
@@ -231,7 +239,7 @@ func (rf *Raft) convertToFollower(term int) {
 // from candidate to leader
 func (rf *Raft) convertToLeader() {
 	rf.state = Leader
-	DPrintf("server %d at term %d is converting to leader \n", rf.me, rf.term)
+	DPrintf("server %d at term %d is converting to leader \n", rf.me, rf.Term)
 	go rf.timeout.stop()
 	leadership := newLeadershipManager(rf)
 	rf.leadership = leadership
@@ -255,10 +263,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
-	rf.term = 0
-	rf.logs = make([]LogEntry, 0)
+	rf.Term = 0
+	rf.Logs = make([]LogEntry, 0)
 	// vote for nobody
-	rf.votedFor = -1
+	rf.VotedFor = -1
 	rf.state = Follower
 	rf.commitIndex = 0
 	rf.lastApplied = 0

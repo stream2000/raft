@@ -20,17 +20,17 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	if rf.term > args.Term {
-		reply.Term = rf.term
+	if rf.Term > args.Term {
+		reply.Term = rf.Term
 		return
 	}
 	// do up-to-date check here before check other conditions
 	moreUpToDate := true
 	reply.Term = args.Term
-	lastLogIndex := len(rf.logs)
+	lastLogIndex := len(rf.Logs)
 	lastLogTerm := 0
 	if lastLogIndex != 0 {
-		lastLogTerm = rf.logs[lastLogIndex-1].Term
+		lastLogTerm = rf.Logs[lastLogIndex-1].Term
 	}
 	if lastLogTerm > args.LastLogTerm {
 		moreUpToDate = false
@@ -39,23 +39,26 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		moreUpToDate = false
 	}
 
-	if rf.term < args.Term {
+	if rf.Term < args.Term {
 		rf.convertToFollower(args.Term)
 		if moreUpToDate {
-			rf.votedFor = args.CandidateId
+			rf.VotedFor = args.CandidateId
+			rf.persist()
 			reply.VoteGranted = true
 		} else {
-			rf.votedFor = -1
+			rf.VotedFor = -1
+			rf.persist()
 			reply.VoteGranted = false
 		}
 		return
 	}
 	// the follower changes it's term
-	if rf.term == args.Term {
-		if rf.state == Follower && rf.votedFor == -1 && moreUpToDate {
+	if rf.Term == args.Term {
+		if rf.state == Follower && rf.VotedFor == -1 && moreUpToDate {
 			rf.timeout.restartTimer()
 			reply.VoteGranted = true
-			rf.votedFor = args.CandidateId
+			rf.VotedFor = args.CandidateId
+			rf.persist()
 		}
 	}
 }
@@ -87,34 +90,34 @@ func (rf *Raft) AppendEntries(args *AppendEntriesReq, reply *AppendEntriesResp) 
 	defer rf.mu.Unlock()
 
 	// #1 term check
-	if rf.term > args.Term {
+	if rf.Term > args.Term {
 		// reject this request
-		reply.Term = rf.term
+		reply.Term = rf.Term
 		return
 	}
 	defer rf.timeout.restartTimer()
 	reply.Term = args.Term
-	if rf.state == Candidate || rf.term < args.Term {
+	if rf.state == Candidate || rf.Term < args.Term {
 		rf.convertToFollower(args.Term)
 	} // else, in the same term, and the server already know the leader
 
 	// #2 check weather previous log term matched, and do the optimization mentioned in page 7-8
 	prevLogTerm := 0
-	if args.PrevLogIndex > len(rf.logs) {
+	if args.PrevLogIndex > len(rf.Logs) {
 		// make reply.ConflictTerm  bigger than args.Term so that leader can adopt the first index
 		reply.ConflictTerm = -1
-		reply.FirstIndex = len(rf.logs)
+		reply.FirstIndex = len(rf.Logs)
 		return
 	}
 	if args.PrevLogIndex != 0 {
-		prevLogTerm = rf.logs[args.PrevLogIndex-1].Term
+		prevLogTerm = rf.Logs[args.PrevLogIndex-1].Term
 	}
 	// log conflicts, cal the firstIndex of the conflicting term in logs
 	if prevLogTerm != args.PrevLogTerm {
 		reply.ConflictTerm = prevLogTerm
 		first := args.PrevLogIndex
 		for first >= 1 {
-			if rf.logs[first-1].Term == prevLogTerm {
+			if rf.Logs[first-1].Term == prevLogTerm {
 				reply.FirstIndex = first
 				first--
 			} else {
@@ -140,25 +143,28 @@ func (rf *Raft) AppendEntries(args *AppendEntriesReq, reply *AppendEntriesResp) 
 	if len(args.Entries) == 0 { // heartbeat message, return true
 		return
 	}
-	if args.PrevLogIndex == len(rf.logs) { // nil entry won't conflict with the incoming entry
+	if args.PrevLogIndex == len(rf.Logs) { // nil entry won't conflict with the incoming entry
 		reply.Success = true
-		rf.logs = append(rf.logs, args.Entries...)
-		indexOfLastNewEntry = len(rf.logs)
+		rf.Logs = append(rf.Logs, args.Entries...)
+		rf.persist()
+		indexOfLastNewEntry = len(rf.Logs)
 		return
 	}
 
 	for index := 0; index < len(args.Entries); index++ {
-		if index+args.PrevLogIndex+1 <= len(rf.logs) {
-			if args.Entries[index].Term != rf.logs[index+args.PrevLogIndex].Term { // conflicts with new entry
+		if index+args.PrevLogIndex+1 <= len(rf.Logs) {
+			if args.Entries[index].Term != rf.Logs[index+args.PrevLogIndex].Term { // conflicts with new entry
 				// truncate the logs
-				rf.logs = rf.logs[:index+args.PrevLogIndex]
-				rf.logs = append(rf.logs, args.Entries[index:]...)
-				indexOfLastNewEntry = len(rf.logs)
+				rf.Logs = rf.Logs[:index+args.PrevLogIndex]
+				rf.Logs = append(rf.Logs, args.Entries[index:]...)
+				rf.persist()
+				indexOfLastNewEntry = len(rf.Logs)
 				return
 			}
 		} else {
-			rf.logs = append(rf.logs, args.Entries[index:]...)
-			indexOfLastNewEntry = len(rf.logs)
+			rf.Logs = append(rf.Logs, args.Entries[index:]...)
+			rf.persist()
+			indexOfLastNewEntry = len(rf.Logs)
 			return
 		}
 	}

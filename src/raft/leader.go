@@ -40,16 +40,16 @@ func (l *leadershipManager) stop() {
 func (l *leadershipManager) start() {
 	// initial heartbeat, but still need to set some status, because heartbeat have nothing different from normal append
 	l.rf.mu.Lock()
-	prevLogIndex := len(l.rf.logs)
+	prevLogIndex := len(l.rf.Logs)
 	prevLogTerm := 0
 	if prevLogIndex > 0 {
-		prevLogTerm = l.rf.logs[prevLogIndex-1].Term
+		prevLogTerm = l.rf.Logs[prevLogIndex-1].Term
 	}
 	// empty appendEntries request
 	args := &AppendEntriesReq{
 		Term:            l.term,
 		LeaderId:        l.rf.me,
-		PrevLogIndex:    len(l.rf.logs),
+		PrevLogIndex:    len(l.rf.Logs),
 		PrevLogTerm:     prevLogTerm,
 		LeaderCommitted: l.rf.commitIndex,
 	}
@@ -77,14 +77,14 @@ func (l *leadershipManager) start() {
 				Term:            l.term,
 				LeaderId:        l.rf.me,
 				LeaderCommitted: l.rf.commitIndex,
-				Entries:         l.rf.logs[next-1:],
+				Entries:         l.rf.Logs[next-1:],
 			}
 			//DPrintf("append: server %d send to %d  from index %d to %d \n", l.rf.me, i, next, next+len(args.Entries)-1)
 			//DPrintf("append: server %d send to %d\n", l.rf.me, i)
 			//DPrintf("args : %+v", *args)
 			if next != 1 {
 				args.PrevLogIndex = next - 1
-				args.PrevLogTerm = l.rf.logs[next-2].Term
+				args.PrevLogTerm = l.rf.Logs[next-2].Term
 			}
 			go l.appendEntriesHandler(i, args)
 		}
@@ -105,7 +105,7 @@ func (l *leadershipManager) appendEntriesHandler(server int, args *AppendEntries
 		if reply.Term != args.Term {
 			l.stop()
 			l.rf.mu.Lock()
-			term := l.rf.term
+			term := l.rf.Term
 			if term < reply.Term {
 				l.rf.convertToFollower(reply.Term)
 			}
@@ -129,7 +129,7 @@ func (l *leadershipManager) appendEntriesHandler(server int, args *AppendEntries
 					return
 				}
 				for index := args.PrevLogIndex; index >= 1; index-- {
-					curEntry := l.rf.logs[index-1]
+					curEntry := l.rf.Logs[index-1]
 					if curEntry.Term == reply.ConflictTerm {
 						l.nextIndex[server] = index + 1
 						return
@@ -178,7 +178,7 @@ func (c *committer) start() {
 					l.rf.mu.Unlock()
 					return
 				}
-				termToCommit := l.rf.logs[curMatch-1].Term
+				termToCommit := l.rf.Logs[curMatch-1].Term
 				if termToCommit != l.term {
 					l.rf.mu.Unlock()
 					continue
@@ -204,17 +204,17 @@ func (c *committer) tick() {
 //
 func newLeadershipManager(rf *Raft) *leadershipManager {
 	l := new(leadershipManager)
-	l.term = rf.term
+	l.term = rf.Term
 	l.nextIndex = make([]int, len(rf.peers))
 	l.matchIndex = make([]int, len(rf.peers))
-	l.matchIndex[rf.me] = len(rf.logs)
+	l.matchIndex[rf.me] = len(rf.Logs)
 	l.rf = rf
 	l.commitIndex = rf.commitIndex
 	for i := range rf.peers {
 		if i == rf.me {
 			continue
 		}
-		l.nextIndex[i] = len(rf.logs) + 1
+		l.nextIndex[i] = len(rf.Logs) + 1
 	}
 	c := &committer{l: l, tickChan: make(chan struct{}, 1)}
 	l.c = c

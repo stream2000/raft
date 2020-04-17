@@ -29,7 +29,7 @@ func (a *applyManager) start() {
 				a.rf.lastApplied++
 				msg := ApplyMsg{
 					CommandValid: true,
-					Command:      a.rf.logs[a.rf.lastApplied-1].Command,
+					Command:      a.rf.Logs[a.rf.lastApplied-1].Command,
 					CommandIndex: a.rf.lastApplied,
 				}
 				DPrintf("server %d applied entry %v\n", a.rf.me, msg)

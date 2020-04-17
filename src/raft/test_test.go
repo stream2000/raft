@@ -11,6 +11,7 @@ package raft
 import (
 	"fmt"
 	"math/rand"
+	_ "net/http/pprof"
 	"sync"
 	"sync/atomic"
 	"testing"

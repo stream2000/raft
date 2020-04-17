@@ -41,7 +41,7 @@ func (e *electionManager) requestVoteHandler(server int, args *RequestVoteArgs) 
 			e.cancel()
 			e.rf.mu.Lock()
 			// get current term and compare
-			term := e.rf.term
+			term := e.rf.Term
 			if term < reply.Term {
 				e.rf.convertToFollower(reply.Term)
 			}
@@ -63,7 +63,7 @@ func (e *electionManager) requestVoteHandler(server int, args *RequestVoteArgs) 
 					}
 					e.rf.mu.Lock()
 					defer e.rf.mu.Unlock()
-					if e.rf.state == Candidate && e.rf.term == args.Term {
+					if e.rf.state == Candidate && e.rf.Term == args.Term {
 						e.rf.convertToLeader()
 					}
 				}
