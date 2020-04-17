@@ -14,7 +14,6 @@ import (
 // until it gains enough votes or is canceled by other events
 type electionManager struct {
 	rf        *Raft
-	voted     []int32
 	voteCount int
 	mu        sync.Mutex
 	finished  int32
@@ -81,7 +80,6 @@ func (e *electionManager) cancel() {
 func NewElectionManager(rf *Raft) *electionManager {
 	e := &electionManager{
 		rf:        rf,
-		voted:     make([]int32, len(rf.peers)),
 		voteCount: 1,
 	}
 	return e

@@ -18,6 +18,7 @@ package raft
 //
 
 import (
+	_ "net/http/pprof"
 	"sync"
 	"sync/atomic"
 
@@ -63,10 +64,8 @@ type Raft struct {
 	leadership  *leadershipManager
 	election    *electionManager
 	mu          sync.Mutex // Lock to protect shared access to this peer's state
-	// Your data here (2A, 2B, 2C).
-	// Look at the paper's Figure 2 for a description of what
-	// state a Raft server must maintain.
-
+	applyCh     chan ApplyMsg
+	ap          *applyManager
 }
 
 type raftState int
@@ -78,6 +77,9 @@ const (
 )
 
 type LogEntry struct {
+	Index   int
+	Term    int
+	Command interface{}
 }
 
 // return currentTerm and whether this server
@@ -141,13 +143,26 @@ func (rf *Raft) readPersist(data []byte) {
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
-	isLeader := true
-
 	// Your code here (2B).
-
-	return index, term, isLeader
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if rf.state != Leader {
+		index := -1
+		term := -1
+		return index, term, false
+	}
+	index := len(rf.logs) + 1
+	term := rf.term
+	// directly append the log then return, other background goroutine will check the length of logs
+	entry := LogEntry{
+		Index:   index,
+		Term:    term,
+		Command: command,
+	}
+	rf.logs = append(rf.logs, entry)
+	rf.leadership.matchIndex[rf.me] = len(rf.logs)
+	DPrintf("start: server %d add entry at term %d cur length %d\n", rf.me, rf.term, len(rf.logs))
+	return index, term, true
 }
 
 //
@@ -182,8 +197,10 @@ func (rf *Raft) convertToCandidate() {
 	args := &RequestVoteArgs{
 		Term:         rf.term,
 		CandidateId:  rf.me,
-		LastLogIndex: 0,
-		LastLogTerm:  0,
+		LastLogIndex: len(rf.logs),
+	}
+	if args.LastLogIndex != 0 {
+		args.LastLogTerm = rf.logs[args.LastLogIndex-1].Term
 	}
 	go e.send(args)
 }
@@ -216,7 +233,7 @@ func (rf *Raft) convertToLeader() {
 	rf.state = Leader
 	DPrintf("server %d at term %d is converting to leader \n", rf.me, rf.term)
 	go rf.timeout.stop()
-	leadership := NewLeadershipManager(rf)
+	leadership := newLeadershipManager(rf)
 	rf.leadership = leadership
 	go rf.leadership.start()
 }
@@ -246,10 +263,15 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.commitIndex = 0
 	rf.lastApplied = 0
 	rf.cancel = make(chan struct{})
+	rf.applyCh = applyCh
 	// start the election timeout timer
 	timeout := NewTimeoutManager(rf, 500)
 	rf.timeout = timeout
 	go rf.timeout.start()
+	// command applier
+	ap := newApplyManager(rf)
+	rf.ap = ap
+	go ap.start()
 	// Your initialization code here (2A, 2B, 2C).
 
 	// initialize from state persisted before a crash

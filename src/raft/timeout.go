@@ -21,7 +21,7 @@ func NewTimeoutManager(rf *Raft, baseTimeout int) (e *timeoutManager) {
 	rand.Seed(time.Now().Unix())
 	e = &timeoutManager{rf: rf, timeout: baseTimeout}
 	e.rChan = make(chan struct{})
-	e.cancel = make(chan struct{})
+	e.cancel = make(chan struct{}, 1)
 	return
 }
 
@@ -58,6 +58,8 @@ func (m *timeoutManager) start() {
 	}
 }
 
+// we try to restart the timer, if failed, that means the no one is listening or the goroutine is executing other branch
+// and may be blocking. Based on the logic of timeoutManager, we can simply discard this message
 func (m *timeoutManager) restartTimer() {
 	select {
 	case m.rChan <- struct{}{}:
@@ -65,8 +67,12 @@ func (m *timeoutManager) restartTimer() {
 	}
 }
 
+// the stop action must be done at least once, so we use a buffered channel
 func (m *timeoutManager) stop() {
-	m.cancel <- struct{}{}
+	select {
+	case m.cancel <- struct{}{}:
+	default:
+	}
 }
 
 func (m *timeoutManager) random() time.Duration {
