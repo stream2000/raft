@@ -17,8 +17,11 @@ type timeoutManager struct {
 	cancel  chan struct{}
 }
 
-func NewTimeoutManager(rf *Raft, baseTimeout int) (e *timeoutManager) {
+func init() {
 	rand.Seed(time.Now().Unix())
+}
+
+func NewTimeoutManager(rf *Raft, baseTimeout int) (e *timeoutManager) {
 	e = &timeoutManager{rf: rf, timeout: baseTimeout}
 	e.rChan = make(chan struct{})
 	e.cancel = make(chan struct{}, 1)
@@ -37,9 +40,7 @@ func (m *timeoutManager) start() {
 				// drain the channel
 				<-t.C
 			}
-			m.rf.mu.Lock()
 			expired = false
-			m.rf.mu.Unlock()
 			t.Reset(m.random())
 		case <-t.C:
 			// timeout event fired
@@ -76,8 +77,8 @@ func (m *timeoutManager) stop() {
 }
 
 func (m *timeoutManager) random() time.Duration {
-	max := m.timeout + 100
-	min := m.timeout - 100
+	max := m.timeout + FloatTimeout
+	min := m.timeout - FloatTimeout
 	r := rand.Intn(max-min) + min
 	return time.Millisecond * time.Duration(r)
 }

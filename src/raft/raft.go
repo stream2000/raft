@@ -46,6 +46,12 @@ type ApplyMsg struct {
 	CommandIndex int
 }
 
+const (
+	BaseElectionTimeout = 400
+	FloatTimeout        = 100
+	HeartbeatInterval   = 50
+)
+
 //
 // A Go object implementing a single Raft peer.
 //
@@ -167,7 +173,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.Logs = append(rf.Logs, entry)
 	rf.persist()
 	rf.leadership.matchIndex[rf.me] = len(rf.Logs)
-	DPrintf("start: server %d add entry at term %d cur length %d\n", rf.me, rf.Term, len(rf.Logs))
+	DPrintf("start: server %d add entry{%v} at term %d cur length %d\n", rf.me, command, rf.Term, len(rf.Logs))
 	return index, term, true
 }
 
@@ -229,7 +235,7 @@ func (rf *Raft) convertToFollower(term int) {
 	case Leader:
 		go rf.leadership.stop()
 		rf.state = Follower
-		timeout := NewTimeoutManager(rf, 500)
+		timeout := NewTimeoutManager(rf, BaseElectionTimeout)
 		rf.timeout = timeout
 		go rf.timeout.start()
 		return
@@ -241,9 +247,19 @@ func (rf *Raft) convertToLeader() {
 	rf.state = Leader
 	DPrintf("server %d at term %d is converting to leader \n", rf.me, rf.Term)
 	go rf.timeout.stop()
-	leadership := newLeadershipManager(rf)
-	rf.leadership = leadership
-	go rf.leadership.start()
+	l := newLeadershipManager(rf)
+	rf.leadership = l
+	args := &AppendEntriesReq{
+		Term:            l.term,
+		LeaderId:        l.rf.me,
+		LeaderCommitted: l.commitIndex,
+	}
+	next := len(rf.Logs) + 1
+	if next != 1 {
+		args.PrevLogIndex = next - 1
+		args.PrevLogTerm = l.rf.Logs[next-2].Term
+	}
+	go rf.leadership.start(args)
 }
 
 //
@@ -273,7 +289,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 	// start the election timeout timer
-	timeout := NewTimeoutManager(rf, 500)
+	timeout := NewTimeoutManager(rf, BaseElectionTimeout)
 	rf.timeout = timeout
 	go rf.timeout.start()
 	// command applier

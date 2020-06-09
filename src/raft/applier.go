@@ -24,7 +24,8 @@ func (a *applyManager) start() {
 			// snapshot the commit index
 			a.rf.mu.Lock()
 			commitIndex := a.rf.commitIndex
-			a.rf.mu.Unlock()
+			msgs := make([]ApplyMsg, commitIndex-a.rf.lastApplied)
+			msgs = msgs[:0]
 			for a.rf.lastApplied < commitIndex {
 				a.rf.lastApplied++
 				msg := ApplyMsg{
@@ -32,7 +33,11 @@ func (a *applyManager) start() {
 					Command:      a.rf.Logs[a.rf.lastApplied-1].Command,
 					CommandIndex: a.rf.lastApplied,
 				}
-				DPrintf("server %d applied entry %v\n", a.rf.me, msg)
+				msgs = append(msgs, msg)
+				DPrintf("server %d applied entry   %v with term %d  \n", a.rf.me, msg, a.rf.Logs[a.rf.lastApplied-1].Term)
+			}
+			a.rf.mu.Unlock()
+			for _, msg := range msgs {
 				a.rf.applyCh <- msg
 			}
 		}

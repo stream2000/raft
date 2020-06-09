@@ -37,37 +37,25 @@ func (l *leadershipManager) stop() {
 }
 
 // start will start the leadership manager daemon
-func (l *leadershipManager) start() {
-	// initial heartbeat, but still need to set some status, because heartbeat have nothing different from normal append
-	l.rf.mu.Lock()
-	prevLogIndex := len(l.rf.Logs)
-	prevLogTerm := 0
-	if prevLogIndex > 0 {
-		prevLogTerm = l.rf.Logs[prevLogIndex-1].Term
-	}
-	// empty appendEntries request
-	args := &AppendEntriesReq{
-		Term:            l.term,
-		LeaderId:        l.rf.me,
-		PrevLogIndex:    len(l.rf.Logs),
-		PrevLogTerm:     prevLogTerm,
-		LeaderCommitted: l.rf.commitIndex,
-	}
+func (l *leadershipManager) start(initArg *AppendEntriesReq) {
 	for i := range l.rf.peers {
 		if i == l.rf.me {
 			continue
 		}
-		go l.appendEntriesHandler(i, args)
+		go l.appendEntriesHandler(i, initArg)
 	}
-	l.rf.mu.Unlock()
-	time.Sleep(time.Millisecond * 105)
-
+	time.Sleep(time.Millisecond * HeartbeatInterval)
 	for {
 		if atomic.LoadInt32(&l.finished) == 1 || l.rf.killed() {
 			return
 		}
 		//	DPrintf("leader %d in term %d is sending heartbeat \n", args.LeaderId, l.term)
+		l.mu.Lock()
 		l.rf.mu.Lock()
+		if l.term != l.rf.Term {
+			l.rf.mu.Unlock()
+			return
+		}
 		for i := range l.rf.peers {
 			if i == l.rf.me {
 				continue
@@ -76,7 +64,7 @@ func (l *leadershipManager) start() {
 			args := &AppendEntriesReq{
 				Term:            l.term,
 				LeaderId:        l.rf.me,
-				LeaderCommitted: l.rf.commitIndex,
+				LeaderCommitted: l.commitIndex,
 				Entries:         l.rf.Logs[next-1:],
 			}
 			//DPrintf("append: server %d send to %d  from index %d to %d \n", l.rf.me, i, next, next+len(args.Entries)-1)
@@ -89,9 +77,9 @@ func (l *leadershipManager) start() {
 			go l.appendEntriesHandler(i, args)
 		}
 		l.rf.mu.Unlock()
-		time.Sleep(time.Millisecond * 150)
+		l.mu.Unlock()
+		time.Sleep(time.Millisecond * HeartbeatInterval)
 	}
-
 }
 
 func (l *leadershipManager) appendEntriesHandler(server int, args *AppendEntriesReq) {
@@ -126,6 +114,11 @@ func (l *leadershipManager) appendEntriesHandler(server int, args *AppendEntries
 					l.nextIndex[server] = reply.FirstIndex
 					return
 				}
+				l.rf.mu.Lock()
+				defer l.rf.mu.Unlock()
+				if l.term != l.rf.Term {
+					return
+				}
 				for index := args.PrevLogIndex; index >= 1; index-- {
 					curEntry := l.rf.Logs[index-1]
 					if curEntry.Term == reply.ConflictTerm {
@@ -157,12 +150,14 @@ func (c *committer) start() {
 		case <-c.tickChan:
 			// increase commit index as much as possible
 			for {
+				l.mu.Lock()
 				matchCount := 0
 				for _, x := range l.matchIndex {
 					if x > curMatch {
 						matchCount++
 					}
 				}
+				l.mu.Unlock()
 				if matchCount > len(l.matchIndex)/2 {
 					curMatch++
 					if curMatch <= l.commitIndex {

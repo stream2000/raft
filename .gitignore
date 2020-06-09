@@ -3,3 +3,11 @@ api.key
 *-handin.tar.gz
 /.idea/
 /src/main/mr-tmp/*
+/src/raft/log*/*
+/src/raft/*.log
+/src/raft/*.err
+/src/raft/log/prof.cpu
+/src/raft/log/raft.test
+/src/raft/go_test_many.sh
+.DS_Store
+/src/.DS_Store

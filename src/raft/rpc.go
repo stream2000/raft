@@ -49,6 +49,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			rf.VotedFor = -1
 			rf.persist()
 			reply.VoteGranted = false
+			rf.convertToCandidate()
 		}
 		return
 	}
@@ -95,11 +96,12 @@ func (rf *Raft) AppendEntries(args *AppendEntriesReq, reply *AppendEntriesResp) 
 		reply.Term = rf.Term
 		return
 	}
-	defer rf.timeout.restartTimer()
 	reply.Term = args.Term
 	if rf.state == Candidate || rf.Term < args.Term {
 		rf.convertToFollower(args.Term)
-	} // else, in the same term, and the server already know the leader
+	} else { // else, in the same term, and the server already know the leader
+		rf.timeout.restartTimer()
+	}
 
 	// #2 check weather previous log term matched, and do the optimization mentioned in page 7-8
 	prevLogTerm := 0

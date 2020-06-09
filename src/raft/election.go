@@ -67,6 +67,10 @@ func (e *electionManager) requestVoteHandler(server int, args *RequestVoteArgs) 
 						e.rf.convertToLeader()
 					}
 				}
+			} else {
+				// be rejected, sleep
+				DPrintf("server %d was rejected by %d\n", e.rf.me, server)
+				e.rf.timeout.restartTimer()
 			}
 		}
 	}
